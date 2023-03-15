@@ -1,16 +1,51 @@
+import { IsEmail } from 'class-validator'
+import { AuthDTO } from './dto/auth.dto'
 import { PrismaService } from './../prisma/prisma.service'
-import { Controller, Injectable, Req } from '@nestjs/common'
-import { User, Bookmark } from '@prisma/client'
+import { ForbiddenException, Injectable } from '@nestjs/common'
+import * as argon from 'argon2'
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime'
+import { Prisma } from '@prisma/client'
 
 @Injectable()
 export class AuthService {
     constructor(private prisma: PrismaService) {}
-    signIn() {
-        return { msg: 'I am Sign In' }
+
+    async signUp(dto: AuthDTO) {
+        const hash = await argon.hash(dto.password)
+
+        try {
+            const user = await this.prisma.user.create({
+                data: {
+                    email: dto.email,
+                    hash,
+                },
+            })
+
+            delete user.hash
+            return user
+        } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError) {
+                if (error.code === 'P2002') {
+                    throw new ForbiddenException('Credentials taken')
+                }
+            }
+            throw error
+        }
     }
+    async signIn(dto: AuthDTO) {
+        const user = await this.prisma.user.findUnique({
+            where: {
+                email: dto.email,
+            },
+        })
 
-    signUp() {
+        if (!user) throw new ForbiddenException('Cresidential incorrect')
 
-        return { msg: 'I am Sign Up' }
+        const pwMatches = await argon.verify(user.hash, dto.password)
+
+        if (!pwMatches) throw new ForbiddenException('Cresidential incorrect')
+
+        delete user.hash
+        return user
     }
 }
